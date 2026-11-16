@@ -88,6 +88,7 @@ button:focus-visible{outline:3px solid #e6ff3a;outline-offset:2px}
     <div class="opt"><span>Dominant hand</span><div class="seg" data-k="hand"><button data-v="left">Left</button><button data-v="right">Right</button></div></div>
     <div class="opt"><span>Opponent</span><div class="seg" data-k="diff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
     <div class="opt"><span>How you hold the phone to watch</span><div class="seg" data-k="hold"><button data-v="upright">Upright</button><button data-v="angled">Angled</button><button data-v="low">Low</button></div></div>
+    <div class="opt"><span>Face aim</span><div class="seg" data-k="aim"><button data-v="std">Standard</button><button data-v="strong">Strong</button></div></div>
     <div class="opt"><span>Swing sensitivity</span><div class="seg" data-k="sens"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
     <button id="startBtn" class="primary">Start game</button>
     <p class="warn">Grip your phone firmly (a wrist strap helps) and make sure you have room to swing.</p>
@@ -118,7 +119,8 @@ const DIFF={
 };
 // v = paddle-head speed (m/s) estimated from phone rotation; acc = linear acceleration (m/s²); rot = deg/s fallback
 const SENS={low:{v:3.2,acc:18,rot:380},med:{v:2.2,acc:13,rot:260},high:{v:1.4,acc:9,rot:170}};
-const set={hand:'right',diff:'normal',sens:'med',hold:'angled'};
+const set={hand:'right',diff:'normal',sens:'med',hold:'angled',aim:'std'};
+const AIM={std:3.2,strong:4.1}; // metres of sideways travel per unit of face angle (tan): std ~1.2 m per 20°, strong ~1.5 m
 // how far from upright you hold the phone when you're just watching (degrees back from vertical)
 const HOLD={upright:0,angled:45,low:65};
 try{Object.assign(set,JSON.parse(localStorage.getItem('pp_set')||'{}'))}catch(e){}
@@ -309,7 +311,7 @@ function aimX(timing,side,face){side=side||1;
   if(d&&!ori.live){let hx=d[0],hz=d[2];if(hz<0){hx=-hx;hz=-hz;}if(Math.hypot(hx,hz)>0.2)u=clamp(Math.atan2(hx,hz)/0.9,-1,1);} // mouse only
   if(face==null){const f=faceInfo();face=f?f.side:0;}
   // face direction is the main aim (~1.2 m per 20 degrees); timing adds a smaller push. No cap: overdo either and it goes out.
-  return face*3.2-timing*1.2*hand()*side+u*0.7+ball.x*0.1+(Math.random()-.5)*0.7;
+  return face*(AIM[set.aim]||3.2)-timing*1.2*hand()*side+u*0.7+ball.x*0.1+(Math.random()-.5)*0.7;
 }
 // Shot height (apex, metres): normal hold = low drive, tilted back = floater, way back = lob
 function apexFor(s){
