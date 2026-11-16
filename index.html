@@ -21,7 +21,8 @@ LAYOUT: canvas fills the screen; score pill top, hint bottom, cards centred.
 :root{color-scheme:dark}
 *{box-sizing:border-box;min-width:0}
 html,body{margin:0;height:100%;background:#0b2a4a;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;font-family:Outfit,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#fff;-webkit-tap-highlight-color:transparent}
-canvas{display:block;position:fixed;inset:0;width:100vw;height:100vh}
+#app{position:fixed;top:0;left:0;width:100vw;height:100vh;overflow:hidden;transform-origin:0 0}
+canvas{display:block;position:absolute;inset:0;width:100%;height:100%}
 #hud{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 0;pointer-events:none;opacity:0;transition:opacity .3s}
 #hud.on{opacity:1}
 .score{display:flex;gap:6px;background:rgba(6,20,36,.62);border-radius:14px;padding:6px 8px;backdrop-filter:blur(6px)}
@@ -60,6 +61,7 @@ button:focus-visible{outline:3px solid #e6ff3a;outline-offset:2px}
 </style>
 </head>
 <body>
+<div id="app">
 <canvas id="c"></canvas>
 
 <div id="hud">
@@ -103,6 +105,7 @@ button:focus-visible{outline:3px solid #e6ff3a;outline-offset:2px}
   </div>
 </div>
 
+</div>
 <script>
 {
 'use strict';
@@ -126,8 +129,14 @@ const $=id=>document.getElementById(id);
 // ---------- canvas & camera ----------
 const cv=$('c'),ctx=cv.getContext('2d');
 let W=0,H=0,F=1,CX=0,CY=0;
-function resize(){const d=Math.min(window.devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=Math.round(W*d);cv.height=Math.round(H*d);ctx.setTransform(d,0,0,d,0,0);F=Math.min(2.4*W,1.45*H);CX=W/2;CY=H*0.33;}
-addEventListener('resize',resize);resize();
+// Phones only: if the browser auto-rotates to landscape, rotate the game back so it stays portrait.
+function screenAngle(){let a=typeof window.orientation==='number'?window.orientation:(window.screen&&screen.orientation&&screen.orientation.angle)||0;if(a===270)a=-90;return a;}
+function resize(){const d=Math.min(window.devicePixelRatio||1,2),app=$('app'),vw=innerWidth,vh=innerHeight;
+  const a=screenAngle(),flip=matchMedia('(pointer:coarse)').matches&&vw>vh&&(a===90||a===-90);
+  if(flip){app.style.width=vh+'px';app.style.height=vw+'px';app.style.transform=a===90?`translate(0,${vh}px) rotate(-90deg)`:`translate(${vw}px,0) rotate(90deg)`;}
+  else{app.style.width=vw+'px';app.style.height=vh+'px';app.style.transform='';}
+  W=flip?vh:vw;H=flip?vw:vh;cv.width=Math.round(W*d);cv.height=Math.round(H*d);ctx.setTransform(d,0,0,d,0,0);F=Math.min(2.4*W,1.45*H);CX=W/2;CY=H*0.33;}
+addEventListener('resize',resize);addEventListener('orientationchange',()=>setTimeout(resize,150));resize();
 const cam={x:0,y:2.1,z:-1.8,p:0.22,yaw:0};let cp=Math.cos(cam.p),sp=Math.sin(cam.p),cyw=1,syw=0;
 // where you're looking: follows the phone while you hold it up; holds still while you swing
 const view={tYaw:0,tPitch:0.22,manual:false,needRecenter:false,resetUntil:0};
