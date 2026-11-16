@@ -80,11 +80,13 @@ button:focus-visible{outline:3px solid #e6ff3a;outline-offset:2px}
       <li>Your phone is the paddle. Hold it at a comfortable angle, like reading a text, and you see straight down the court through a see-through paddle face. Turn or tilt the phone to look around and follow the ball.</li>
       <li>Drop it down and turn it to your side like a real paddle and you see its edge. Swing your hand through the ball when it glows yellow.</li>
       <li>The direction you swing aims the shot. Swing harder to hit deeper, but too hard sails long. Tilt the face up to lob.</li>
+      <li>Easy shots always clear the net. In Realistic, the face you hit with and its angle decide the shot: too closed goes into the net, too open pops up or sails long.</li>
       <li>Rally scoring to 11, win by 2. The serve and the return must bounce before they're hit.</li>
     </ol>
     <div class="opt"><span>Dominant hand</span><div class="seg" data-k="hand"><button data-v="left">Left</button><button data-v="right">Right</button></div></div>
     <div class="opt"><span>Opponent</span><div class="seg" data-k="diff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
     <div class="opt"><span>How you hold the phone to watch</span><div class="seg" data-k="hold"><button data-v="upright">Upright</button><button data-v="angled">Angled</button><button data-v="low">Low</button></div></div>
+    <div class="opt"><span>Shot physics</span><div class="seg" data-k="phys"><button data-v="easy">Easy</button><button data-v="real">Realistic</button></div></div>
     <div class="opt"><span>Swing sensitivity</span><div class="seg" data-k="sens"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
     <button id="startBtn" class="primary">Start game</button>
     <p class="warn">Grip your phone firmly (a wrist strap helps) and make sure you have room to swing.</p>
@@ -114,7 +116,7 @@ const DIFF={
 };
 // v = paddle-head speed (m/s) estimated from phone rotation; acc = linear acceleration (m/s²); rot = deg/s fallback
 const SENS={low:{v:3.2,acc:18,rot:380},med:{v:2.2,acc:13,rot:260},high:{v:1.4,acc:9,rot:170}};
-const set={hand:'right',diff:'normal',sens:'med',hold:'angled'};
+const set={hand:'right',diff:'normal',sens:'med',hold:'angled',phys:'easy'};
 // how far from upright you hold the phone when you're just watching (degrees back from vertical)
 const HOLD={upright:0,angled:45,low:65};
 try{Object.assign(set,JSON.parse(localStorage.getItem('pp_set')||'{}'))}catch(e){}
@@ -162,7 +164,7 @@ function sfx(k,v){v=v==null?1:v;
 
 // ---------- state ----------
 const S={mode:'menu',you:0,cpu:0,server:'player',lastHitter:null,bounces:0,hits:0,isServe:false,serveBox:1,t:0,lastHitT:0,serveAt:0,warned:false,prev:'rally'};
-const ball={x:0,y:1,z:8,vx:0,vy:0,vz:0,netHit:false};
+const ball={x:0,y:1,z:8,vx:0,vy:0,vz:0,netHit:false,drag:0};
 const player={x:0,z:-0.4,hx:0,hz:-0.4,pred:null};
 const cpu={x:0,z:14,hx:0,hz:14,pred:null,missed:false,swing:0,walk:0};
 const swing={t:-9999,s:0,used:true};
@@ -208,6 +210,7 @@ const other=s=>s==='player'?'cpu':'player';
 // ---------- physics ----------
 function stepBall(dt){
   const pz=ball.z;
+  if(ball.drag){const sp=Math.hypot(ball.vx,ball.vy,ball.vz),k=ball.drag*sp*dt;ball.vx-=ball.vx*k;ball.vy-=ball.vy*k;ball.vz-=ball.vz*k;} // air drag (holes!)
   ball.vy-=G*dt;ball.x+=ball.vx*dt;ball.y+=ball.vy*dt;ball.z+=ball.vz*dt;
   if(!ball.netHit&&(pz-NET)*(ball.z-NET)<=0&&pz!==ball.z&&Math.abs(ball.x)<HW+0.3&&ball.y<NETH+0.03&&ball.y>0){
     ball.netHit=true;ball.z=NET-Math.sign(ball.vz)*0.06;ball.vz*=-0.15;ball.vx*=0.3;ball.vy=Math.min(ball.vy,0)*0.3;sfx('net');
@@ -218,9 +221,9 @@ function stepBall(dt){
   }
 }
 function predict(side){
-  let x=ball.x,y=ball.y,z=ball.z,vx=ball.vx,vy=ball.vy,vz=ball.vz,t=0;const dt=1/120;
+  let x=ball.x,y=ball.y,z=ball.z,vx=ball.vx,vy=ball.vy,vz=ball.vz,t=0;const dt=1/120,dr=ball.drag;
   let here=S.bounces>=1&&sideOf(ball.z)===side;
-  for(let i=0;i<600;i++){vy-=G*dt;x+=vx*dt;y+=vy*dt;z+=vz*dt;t+=dt;
+  for(let i=0;i<600;i++){if(dr){const k=dr*Math.hypot(vx,vy,vz)*dt;vx-=vx*k;vy-=vy*k;vz-=vz*k;}vy-=G*dt;x+=vx*dt;y+=vy*dt;z+=vz*dt;t+=dt;
     if(y<R&&vy<0){y=R;vy*=-0.7;vx*=0.82;vz*=0.82;if(sideOf(z)===side){if(here)return{x,y,z,t};here=true;}}
     if(here&&vy<0&&y<0.9)return{x,y,z,t};}
   return{x,y,z,t};
@@ -232,7 +235,7 @@ function launch(tx,tz,T,clear){
     if(clear!=null&&(NET-z0)*(tz-NET)>0){const tn=(NET-z0)/vz,yn=y0+vy*tn-0.5*G*tn*tn;if(yn<NETH+clear)ok=false;}
     if(ok||k===39){ball.vx=vx;ball.vy=vy;ball.vz=vz;break;}T+=0.04;
   }
-  ball.netHit=false;
+  ball.netHit=false;ball.drag=0;
 }
 
 // ---------- rules ----------
@@ -271,10 +274,10 @@ function gameOver(){
 // ---------- hitting ----------
 function swingActive(now){return !swing.used&&now-swing.t<230;}
 // dir = direction the paddle is moving (game frame), when known
-function triggerSwing(s,dir){
+function triggerSwing(s,dir,vec){
   const now=performance.now();
-  if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);}return;}
-  swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.used=false;sfx('whoosh');
+  if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);if(vec)swing.vec=vec;}return;}
+  swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.vec=vec||null;swing.used=false;sfx('whoosh');
   // after a swing the view snaps back to the court and follows the ball until you return to your watching angle
   if(playing())resetView(700,'swing');
 }
@@ -285,10 +288,27 @@ function aimX(timing){
   return u*1.6-timing*(ori.live?0.5:1.6)*hand()+ball.x*0.25+(Math.random()-.5)*0.6;
 }
 function hitFx(){sfx('pop');flash=1;try{navigator.vibrate&&navigator.vibrate(35)}catch(e){}}
+// Realistic mode: the ball comes off whichever face meets it, by a simple paddle-ball collision.
+// Face angle sets the launch angle (closed = into the net, slightly open = over, wide open = pops up/long).
+const COR=0.45,GRIP=0.55,SWING_GAIN=1.35,DRAG=0.045;
+const realOn=()=>set.phys==='real'&&ori.live&&pad.G;
+function realisticHit(){
+  const v=(swing.vec||[0,0,2]).map(x=>x*SWING_GAIN),vb=[ball.vx,ball.vy,ball.vz];
+  let n=pad.G.Z.slice(),front=true;
+  const rel=[v[0]-vb[0],v[1]-vb[1],v[2]-vb[2]];
+  if(n[0]*rel[0]+n[1]*rel[1]+n[2]*rel[2]<0){n=n.map(x=>-x);front=false;} // the face moving into the ball
+  const u=[-rel[0],-rel[1],-rel[2]],un=u[0]*n[0]+u[1]*n[1]+u[2]*n[2];
+  if(un>-0.5)return null; // face not really meeting the ball: mishit, it goes by
+  const ut=[u[0]-un*n[0],u[1]-un*n[1],u[2]-un*n[2]];
+  ball.vx=v[0]+ut[0]*GRIP-COR*un*n[0];ball.vy=v[1]+ut[1]*GRIP-COR*un*n[1];ball.vz=v[2]+ut[2]*GRIP-COR*un*n[2];
+  ball.netHit=false;ball.drag=DRAG;
+  $('hint').textContent=front?'Screen side of the paddle':'Back side of the paddle';
+  return true;
+}
 function playerServe(){
   const s=swing.s;swing.used=true;
   const box=-Math.sign(player.x),tz=9.3+s*4.2;
-  launch(box*1.55+(aimX(0)-ball.x*0.25)*0.35,tz,lerp(1.5,0.85,s),0.12);
+  if(!(realOn()&&realisticHit()))launch(box*1.55+(aimX(0)-ball.x*0.25)*0.35,tz,lerp(1.5,0.85,s),0.12);
   S.mode='rally';S.lastHitter='player';S.hits=1;S.bounces=0;S.isServe=true;S.serveBox=box;S.lastHitT=S.t;
   cpu.pred=predict('cpu');cpu.missed=false;hitFx();
 }
@@ -300,13 +320,14 @@ function tryPlayerHit(){
   // with motion controls the paddle itself has to be near the ball
   if(ori.live&&Math.hypot(ball.x-pad.head[0],ball.y-pad.head[1],ball.z-pad.head[2])>0.95)return;
   const s=swing.s;swing.used=true;
+  if(realOn()){if(!realisticHit())return;}else{
   const timing=clamp(dz/0.9,-1,1);
   let tz=NET+1.4+s*5.4+(Math.random()-.5)*0.4,T=lerp(1.5,0.7,s),clear=s<0.12?null:0.12;
   if(ori.live&&pad.G){let n=pad.G.Z;if(n[2]<0)n=n.map(v=>-v);
     if(n[1]>0.45){T*=1.45;tz=Math.min(tz+1,13.2);}      // open face: lob
     else if(n[1]<-0.35&&clear!=null)clear=0.03;}         // closed face: low drive, riskier
   const tx=aimX(timing);
-  launch(tx,tz,T,clear);
+  launch(tx,tz,T,clear);}
   S.lastHitter='player';S.bounces=0;S.hits++;S.isServe=false;S.lastHitT=S.t;
   cpu.pred=predict('cpu');cpu.missed=false;hitFx();
 }
@@ -480,7 +501,8 @@ addEventListener('deviceorientation',e=>{
     if(dt>0.004&&dt<0.25){const P=ori.G,R=(r,c)=>G.X[r]*P.X[c]+G.Y[r]*P.Y[c]+G.Z[r]*P.Z[c];
       const w=[(R(2,1)-R(1,2))/2/dt,(R(0,2)-R(2,0))/2/dt,(R(1,0)-R(0,1))/2/dt];
       ori.turn=len(w);const v=cross(w,G.Y.map(x=>x*0.55)),sp=len(v),th=SENS[set.sens].v; // forearm + paddle ≈ 55 cm lever
-      if(sp>th&&v[1]>-0.5*sp&&playing())triggerSwing(clamp(0.15+(sp-th)/12,0,1),v);}}
+      if(sp>th&&v[1]>-0.5*sp&&playing())triggerSwing(clamp(0.15+(sp-th)/12,0,1),v,v);
+      else if(performance.now()-swing.t<230&&!swing.used&&sp>len(swing.vec||[0,0,0]))swing.vec=v;}}
   // look where the back of the phone points, only while it's held up and fairly still
   if(view.needRecenter&&now>view.resetUntil&&(ori.turn||0)<2.5){
     const tilt=Math.acos(clamp(m.Y[2],-1,1))*180/Math.PI; // degrees back from upright
