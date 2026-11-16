@@ -175,7 +175,10 @@ const S={mode:'menu',you:0,cpu:0,server:'player',lastHitter:null,bounces:0,hits:
 const ball={x:0,y:1,z:8,vx:0,vy:0,vz:0,netHit:false,drag:0};
 const player={x:0,z:-0.4,hx:0,hz:-0.4,pred:null};
 const cpu={x:0,z:14,hx:0,hz:14,pred:null,missed:false,swing:0,walk:0};
-const rhythm={bias:0,n:0}; // your average timing, so your natural swing goes down the middle
+// your average timing per stroke, so your natural forehand and backhand each go down the middle
+const rhythm={fh:{bias:0,face:0,n:0},bh:{bias:0,face:0,n:0}};
+// +1 forehand (paddle on your dominant side), -1 backhand (paddle across to the other side)
+function strokeSide(){const off=(ori.live?pad.head[0]:ball.x)-player.x;return off*hand()<-0.05?-1:1;}
 const swing={t:-9999,s:0,used:true};
 let lowered=0.5,lowSm=0.5,mouseYaw=0,sensorsLive=false,flash=0,mouse={y:0,v:0,vx:0,lt:0,ly:0,lx:0};
 let wake=null;
@@ -297,15 +300,15 @@ function triggerSwing(s,dir,vec){
 }
 // Paddle face pointing toward the net: loft (+ = tilted back / open), side (+ = angled to the right)
 function faceInfo(){
-  if(!(ori.live&&pad.G))return null;let n=pad.G.Z;if(n[2]<0)n=n.map(v=>-v);
+  if(!(ori.live&&pad.G))return null;let n=(ori.Zraw||pad.G.Z).slice();if(n[2]<0)n=n.map(v=>-v);
   return{loft:n[1],side:n[2]>0.35?clamp(n[0]/n[2],-1.2,1.2):0};
 }
 // Left/right placement: timing (early = pull across), face angle, swing direction
-function aimX(timing){
+function aimX(timing,side,face){side=side||1;
   let u=0;const d=swing.dir;
   if(d&&!ori.live){let hx=d[0],hz=d[2];if(hz<0){hx=-hx;hz=-hz;}if(Math.hypot(hx,hz)>0.2)u=clamp(Math.atan2(hx,hz)/0.9,-1,1);} // mouse only
-  const f=faceInfo();
-  return clamp(-timing*2.8*hand()+(f?f.side*1.3:0)+u*0.7+ball.x*0.1+(Math.random()-.5)*0.3,-3.9,3.9);
+  if(face==null){const f=faceInfo();face=f?f.side:0;}
+  return clamp(-timing*2.8*hand()*side+face*1.3+u*0.7+ball.x*0.1+(Math.random()-.5)*0.3,-3.9,3.9);
 }
 // Shot height (apex, metres): normal hold = low drive, tilted back = floater, way back = lob
 function apexFor(s){
@@ -317,8 +320,8 @@ function apexFor(s){
 }
 function flightTime(y0,h){h=Math.max(h,y0+0.15);return Math.sqrt(2*G*(h-y0))/G+Math.sqrt(2*(h-R)/G);}
 let hintT=0;
-function shotHint(h,tx,tm){const k=h<2?'Drive':h<3.2?'Floater':'Lob',side=tx<-1.2?'left':tx>1.2?'right':'middle',when=tm>0.33?'Early':tm<-0.33?'Late':'On time';
-  $('hint').textContent=when+' · '+k+' · '+side;clearTimeout(hintT);hintT=setTimeout(setHint,1400);}
+function shotHint(h,tx,tm,side){const k=h<2?'Drive':h<3.2?'Floater':'Lob',when=tm>0.33?'Early':tm<-0.33?'Late':'On time';
+  $('hint').textContent=(side<0?'Backhand':'Forehand')+' · '+when+' · '+k+' · '+(tx<-1.2?'left':tx>1.2?'right':'middle');clearTimeout(hintT);hintT=setTimeout(setHint,1400);}
 function hitFx(){sfx('pop');flash=1;try{navigator.vibrate&&navigator.vibrate(35)}catch(e){}}
 function playerServe(){
   const s=swing.s;swing.used=true;
@@ -337,12 +340,14 @@ function tryPlayerHit(){
   // with motion controls the paddle itself has to be near the ball
   if(ori.live&&Math.hypot(ball.x-pad.head[0],ball.y-pad.head[1],ball.z-pad.head[2])>1.4)return;
   const s=swing.s;swing.used=true;
-  const raw=swing.timing||0,timing=ori.live?clamp(raw-rhythm.bias,-1,1):raw;
-  if(ori.live){rhythm.n++;const k=rhythm.n<4?0.35:0.15;rhythm.bias=clamp(rhythm.bias*(1-k)+raw*k,-0.6,0.6);}
-  const h=apexFor(s),tz=NET+1.6+s*5.0+(Math.random()-.5)*0.4,tx=aimX(timing);
+  const side=strokeSide(),rh=side>0?rhythm.fh:rhythm.bh;
+  const raw=swing.timing||0,timing=ori.live?clamp(raw-rh.bias,-1,1):raw;
+  const fi=faceInfo(),faceRaw=fi?fi.side:0,face=ori.live?faceRaw-rh.face:faceRaw; // face angle relative to your usual
+  if(ori.live){rh.n++;const k=rh.n<4?0.35:0.15;rh.bias=clamp(rh.bias*(1-k)+raw*k,-0.6,0.6);rh.face=clamp(rh.face*(1-k)+faceRaw*k,-1,1);}
+  const h=apexFor(s),tz=NET+1.6+s*5.0+(Math.random()-.5)*0.4,tx=aimX(timing,side,face);
   const f=faceInfo(),closed=f&&f.loft<-0.03;
   launch(tx,tz,flightTime(ball.y,h),s<0.12||closed?null:0.1);
-  shotHint(h,tx,timing);
+  shotHint(h,tx,timing,side);
   S.lastHitter='player';S.bounces=0;S.hits++;S.isServe=false;S.lastHitT=S.t;
   cpu.pred=predict('cpu');cpu.missed=false;hitFx();
 }
@@ -512,6 +517,7 @@ addEventListener('deviceorientation',e=>{
   const H=ori.H,X0=e2g(m.X,H),off=-(ori.tilt!=null?ori.tilt:(HOLD[set.hold]||0))*Math.PI/180;
   // treat your normal holding angle as "straight ahead" so you don't have to lift the phone upright
   const G={X:X0,Y:rot(e2g(m.Y,H),X0,off),Z:rot(e2g(m.Z,H),X0,off)};
+  ori.Zraw=e2g(m.Z,H); // true paddle-face direction (no watching-angle offset) for shot height and aim
   if(ori.G){const dt=(now-ori.t)/1000;
     if(dt>0.004&&dt<0.25){const P=ori.G,R=(r,c)=>G.X[r]*P.X[c]+G.Y[r]*P.Y[c]+G.Z[r]*P.Z[c];
       const w=[(R(2,1)-R(1,2))/2/dt,(R(0,2)-R(2,0))/2/dt,(R(1,0)-R(0,1))/2/dt];
