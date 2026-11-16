@@ -81,7 +81,7 @@ button:focus-visible{outline:3px solid #e6ff3a;outline-offset:2px}
     <ol>
       <li>Your phone is the paddle. Hold it at a comfortable angle, like reading a text, and you see straight down the court through a see-through paddle face. Turn or tilt the phone to look around and follow the ball.</li>
       <li>Drop it down and turn it to your side like a real paddle and you see its edge. Swing your hand through the ball when it glows yellow.</li>
-      <li>Placement: swing early to pull the ball across, late to push it the other way, and point the paddle face where you want it to go. Swing harder to hit deeper.</li>
+      <li>Placement: point the paddle face where you want the ball to go. Timing adds a little: early pulls across your body, late pushes the other way. Overdo it and it goes out. Swing harder to hit deeper.</li>
       <li>Height: your normal angle hits a low drive. Tilt the face back for a floater, way back to pop up a lob.</li>
       <li>Rally scoring to 11, win by 2. The serve and the return must bounce before they're hit.</li>
     </ol>
@@ -308,7 +308,8 @@ function aimX(timing,side,face){side=side||1;
   let u=0;const d=swing.dir;
   if(d&&!ori.live){let hx=d[0],hz=d[2];if(hz<0){hx=-hx;hz=-hz;}if(Math.hypot(hx,hz)>0.2)u=clamp(Math.atan2(hx,hz)/0.9,-1,1);} // mouse only
   if(face==null){const f=faceInfo();face=f?f.side:0;}
-  return -timing*2.4*hand()*side+face*1.5+u*0.7+ball.x*0.1+(Math.random()-.5)*0.7; // no cap: miss your timing badly and it goes out
+  // face direction is the main aim (~1.2 m per 20 degrees); timing adds a smaller push. No cap: overdo either and it goes out.
+  return face*3.2-timing*1.2*hand()*side+u*0.7+ball.x*0.1+(Math.random()-.5)*0.7;
 }
 // Shot height (apex, metres): normal hold = low drive, tilted back = floater, way back = lob
 function apexFor(s){
