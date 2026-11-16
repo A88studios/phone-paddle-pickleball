@@ -130,6 +130,7 @@ addEventListener('resize',resize);resize();
 const cam={x:0,y:2.1,z:-1.8,p:0.22,yaw:0};let cp=Math.cos(cam.p),sp=Math.sin(cam.p),cyw=1,syw=0;
 // where you're looking: follows the phone while you hold it up; holds still while you swing
 const view={tYaw:0,tPitch:0.22,manual:false,needRecenter:false,resetUntil:0};
+function resetView(ms){if(ori.live){view.needRecenter=true;view.resetUntil=performance.now()+ms;}}
 function setCamAngles(){cp=Math.cos(cam.p);sp=Math.sin(cam.p);cyw=Math.cos(cam.yaw);syw=Math.sin(cam.yaw);}
 function toCamDir(v){const x1=v[0]*cyw-v[2]*syw,z1=v[0]*syw+v[2]*cyw;return[x1,v[1]*cp+z1*sp,z1*cp-v[1]*sp];}
 function toCam(x,y,z){const dx=x-cam.x,dy=y-cam.y,dz0=z-cam.z,x1=dx*cyw-dz0*syw,dz=dx*syw+dz0*cyw;return[x1,dy*cp+dz*sp,dz*cp-dy*sp];}
@@ -250,13 +251,13 @@ function onBounce(iv){
 }
 function endPoint(winner,reason){
   if(S.mode!=='rally')return;
-  S.mode='point';S.t=0;if(winner==='player')S.you++;else S.cpu++;S.server=winner;
+  S.mode='point';S.t=0;if(winner==='player')S.you++;else S.cpu++;S.server=winner;resetView(900);
   showMsg((winner==='player'?'Point! ':'CPU point. ')+reason,1700);sfx(winner==='player'?'win':'lose');hud();
 }
 function nextPoint(){
   if((S.you>=11||S.cpu>=11)&&Math.abs(S.you-S.cpu)>=2)return gameOver();
   S.hits=0;S.bounces=0;S.lastHitter=null;S.isServe=false;S.t=0;S.warned=false;ball.netHit=false;
-  player.pred=cpu.pred=null;cpu.missed=false;
+  player.pred=cpu.pred=null;cpu.missed=false;resetView(600);
   if(S.server==='player'){const sx=S.you%2===0?1.5:-1.5;player.hx=sx;player.hz=-0.4;cpu.hx=-sx;cpu.hz=14;S.mode='serve_player';showMsg('Your serve. Swing!',1400);}
   else{const cx=S.cpu%2===0?-1.5:1.5;cpu.hx=cx;cpu.hz=14;player.hx=-cx;player.hz=-0.4;S.mode='serve_cpu';S.serveAt=1.7;showMsg('CPU serving…',1100);}
   hud();
@@ -274,7 +275,7 @@ function triggerSwing(s,dir){
   if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);}return;}
   swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.used=false;sfx('whoosh');
   // after a swing the view snaps back to the court and follows the ball until you return to your watching angle
-  if(ori.live&&playing()){view.needRecenter=true;view.resetUntil=now+700;}
+  if(playing())resetView(700);
 }
 // Where the shot goes left/right: the way your hand moved (edge-on hits are fine), plus timing
 function aimX(timing){
@@ -349,8 +350,9 @@ function update(dt,now){
   cpu.swing=Math.max(0,cpu.swing-dt*3.5);flash=Math.max(0,flash-dt*4);
   const k=1-Math.exp(-dt*6);cam.x=lerp(cam.x,player.x+hand()*0.15,k);cam.z=lerp(cam.z,player.z-1.4,k);
   if(!view.manual||view.needRecenter){ // no sensors, or just swung: follow the ball for you
-    const live=S.mode==='rally'||S.mode==='point';
-    view.tYaw=live?clamp(Math.atan2(ball.x-cam.x,Math.max(1.5,ball.z-cam.z))*0.6,-0.6,0.6):0;view.tPitch=0.22;}
+    view.tYaw=S.mode==='rally'?clamp(Math.atan2(ball.x-cam.x,Math.max(1.5,ball.z-cam.z))*0.6,-0.6,0.6)
+      :clamp(Math.atan2(cpu.x*0.5-cam.x,14-cam.z),-0.4,0.4); // between points: look across at your opponent
+    view.tPitch=0.22;}
   const kv=1-Math.exp(-dt*(view.needRecenter?8:3.5));cam.yaw=lerp(cam.yaw,view.tYaw,kv);cam.p=lerp(cam.p,view.tPitch,kv);setCamAngles();
 }
 
