@@ -77,17 +77,18 @@ button:focus-visible{outline:3px solid #e6ff3a;outline-offset:2px}
     <h1>Phone <span>Paddle</span> Pickleball</h1>
     <p class="sub">Your phone is the paddle. Stand on the court and swing.</p>
     <ol>
-      <li>Your phone is the paddle. Hold it upright facing the court and you see the paddle face, see-through, so you can watch the ball.</li>
+      <li>Your phone is the paddle. Hold it at a comfortable angle, like reading a text, and you see straight down the court through a see-through paddle face. Turn or tilt the phone to look around and follow the ball.</li>
       <li>Drop it down and turn it to your side like a real paddle and you see its edge. Swing your hand through the ball when it glows yellow.</li>
       <li>The direction you swing aims the shot. Swing harder to hit deeper, but too hard sails long. Tilt the face up to lob.</li>
       <li>Rally scoring to 11, win by 2. The serve and the return must bounce before they're hit.</li>
     </ol>
     <div class="opt"><span>Dominant hand</span><div class="seg" data-k="hand"><button data-v="left">Left</button><button data-v="right">Right</button></div></div>
     <div class="opt"><span>Opponent</span><div class="seg" data-k="diff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
+    <div class="opt"><span>How you hold the phone to watch</span><div class="seg" data-k="hold"><button data-v="upright">Upright</button><button data-v="angled">Angled</button><button data-v="low">Low</button></div></div>
     <div class="opt"><span>Swing sensitivity</span><div class="seg" data-k="sens"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
     <button id="startBtn" class="primary">Start game</button>
     <p class="warn">Grip your phone firmly (a wrist strap helps) and make sure you have room to swing.</p>
-    <p class="note">Hold the phone in portrait. If the paddle drifts off to one side, hold the phone upright facing the court and tap Center. On a computer: move the mouse to position the paddle, then click or press Space to swing.</p>
+    <p class="note">Hold the phone in portrait. If the view drifts to one side, hold the phone at your normal angle facing the court and tap Center. On a computer: move the mouse to position the paddle, then click or press Space to swing.</p>
   </div>
 </div>
 
@@ -113,7 +114,9 @@ const DIFF={
 };
 // v = paddle-head speed (m/s) estimated from phone rotation; acc = linear acceleration (m/s²); rot = deg/s fallback
 const SENS={low:{v:3.2,acc:18,rot:380},med:{v:2.2,acc:13,rot:260},high:{v:1.4,acc:9,rot:170}};
-const set={hand:'right',diff:'normal',sens:'med'};
+const set={hand:'right',diff:'normal',sens:'med',hold:'angled'};
+// how far from upright you hold the phone when you're just watching (degrees back from vertical)
+const HOLD={upright:0,angled:45,low:65};
 try{Object.assign(set,JSON.parse(localStorage.getItem('pp_set')||'{}'))}catch(e){}
 const clamp=(v,a,b)=>v<a?a:v>b?b:v, lerp=(a,b,t)=>a+(b-a)*t;
 const hand=()=>set.hand==='right'?1:-1;
@@ -254,7 +257,6 @@ function nextPoint(){
   if((S.you>=11||S.cpu>=11)&&Math.abs(S.you-S.cpu)>=2)return gameOver();
   S.hits=0;S.bounces=0;S.lastHitter=null;S.isServe=false;S.t=0;S.warned=false;ball.netHit=false;
   player.pred=cpu.pred=null;cpu.missed=false;
-  if(ori.raw&&ori.raw.Y[2]>0.75)recenter(); // phone held upright: re-aim "forward" at the court
   if(S.server==='player'){const sx=S.you%2===0?1.5:-1.5;player.hx=sx;player.hz=-0.4;cpu.hx=-sx;cpu.hz=14;S.mode='serve_player';showMsg('Your serve. Swing!',1400);}
   else{const cx=S.cpu%2===0?-1.5:1.5;cpu.hx=cx;cpu.hz=14;player.hx=-cx;player.hz=-0.4;S.mode='serve_cpu';S.serveAt=1.7;showMsg('CPU serving…',1100);}
   hud();
@@ -347,7 +349,7 @@ function update(dt,now){
   if(!view.manual){ // no motion sensors: gently follow the ball for you
     const live=S.mode==='rally'||S.mode==='point';
     view.tYaw=live?clamp(Math.atan2(ball.x-cam.x,Math.max(1.5,ball.z-cam.z))*0.6,-0.6,0.6):0;view.tPitch=0.22;}
-  const kv=1-Math.exp(-dt*10);cam.yaw=lerp(cam.yaw,view.tYaw,kv);cam.p=lerp(cam.p,view.tPitch,kv);setCamAngles();
+  const kv=1-Math.exp(-dt*3.5);cam.yaw=lerp(cam.yaw,view.tYaw,kv);cam.p=lerp(cam.p,view.tPitch,kv);setCamAngles();
 }
 
 // ---------- drawing ----------
@@ -461,7 +463,9 @@ addEventListener('deviceorientation',e=>{
   if(e.beta==null)return;
   const now=performance.now(),m=devMatrix(e.alpha||0,e.beta,e.gamma||0);ori.raw=m;
   if(ori.H==null)ori.H=headingOf(m);
-  const H=ori.H,G={X:e2g(m.X,H),Y:e2g(m.Y,H),Z:e2g(m.Z,H)};
+  const H=ori.H,X0=e2g(m.X,H),off=-(HOLD[set.hold]||0)*Math.PI/180;
+  // treat your normal holding angle as "straight ahead" so you don't have to lift the phone upright
+  const G={X:X0,Y:rot(e2g(m.Y,H),X0,off),Z:rot(e2g(m.Z,H),X0,off)};
   if(ori.G){const dt=(now-ori.t)/1000;
     if(dt>0.004&&dt<0.25){const P=ori.G,R=(r,c)=>G.X[r]*P.X[c]+G.Y[r]*P.Y[c]+G.Z[r]*P.Z[c];
       const w=[(R(2,1)-R(1,2))/2/dt,(R(0,2)-R(2,0))/2/dt,(R(1,0)-R(0,1))/2/dt];
@@ -469,7 +473,7 @@ addEventListener('deviceorientation',e=>{
       if(sp>th&&v[1]>-0.5*sp&&playing())triggerSwing(clamp(0.15+(sp-th)/12,0,1),v);}}
   // look where the back of the phone points, only while it's held up and fairly still
   {const lk=[-G.Z[0],-G.Z[1],-G.Z[2]],upw=G.Y[1],turn=ori.G?ori.turn||0:0,hz=Math.hypot(lk[0],lk[2]);
-   if(upw>0.6&&turn<4&&hz>0.3){view.tYaw=clamp(Math.atan2(lk[0],lk[2]),-1.3,1.3);view.tPitch=clamp(0.22+Math.asin(clamp(-lk[1],-1,1))*0.9,-0.15,0.85);view.manual=true;}}
+   if(upw>0.6&&turn<4&&hz>0.3){view.tYaw=clamp(Math.atan2(lk[0],lk[2]),-1.3,1.3);view.tPitch=clamp(0.22+Math.asin(clamp(-lk[1],-1,1))*0.75,-0.1,0.8);view.manual=true;}}
   ori.G=G;ori.t=now;
   if(!ori.live){ori.live=true;sensorsLive=true;setHint();}
 });
