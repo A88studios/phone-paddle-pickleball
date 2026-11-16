@@ -289,7 +289,7 @@ function swingActive(now){return !swing.used&&now-swing.t<420;} // an early swin
 // early/late at this instant: + = before the ball reaches your contact point, - = after.
 // The late window is short (the ball is dropping), so lateness counts ~3x as much as earliness.
 function timingNow(){const dz=ball.z-(player.z+0.35),vz=-ball.vz,tTo=vz>0.5?dz/vz:0;
-  return tTo>=0?clamp(tTo/0.3,0,1):clamp(tTo/0.1,-1,0);}
+  return tTo>=0?clamp(tTo/0.25,0,2):clamp(tTo/0.09,-2,0);}
 function triggerSwing(s,dir,vec){
   const now=performance.now();
   if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);if(vec)swing.vec=vec;swing.timing=timingNow();}return;} // timing = fastest point of the swing
@@ -308,7 +308,7 @@ function aimX(timing,side,face){side=side||1;
   let u=0;const d=swing.dir;
   if(d&&!ori.live){let hx=d[0],hz=d[2];if(hz<0){hx=-hx;hz=-hz;}if(Math.hypot(hx,hz)>0.2)u=clamp(Math.atan2(hx,hz)/0.9,-1,1);} // mouse only
   if(face==null){const f=faceInfo();face=f?f.side:0;}
-  return clamp(-timing*2.8*hand()*side+face*1.3+u*0.7+ball.x*0.1+(Math.random()-.5)*0.3,-3.9,3.9);
+  return -timing*2.4*hand()*side+face*1.5+u*0.7+ball.x*0.1+(Math.random()-.5)*0.7; // no cap: miss your timing badly and it goes out
 }
 // Shot height (apex, metres): normal hold = low drive, tilted back = floater, way back = lob
 function apexFor(s){
@@ -341,9 +341,9 @@ function tryPlayerHit(){
   if(ori.live&&Math.hypot(ball.x-pad.head[0],ball.y-pad.head[1],ball.z-pad.head[2])>1.4)return;
   const s=swing.s;swing.used=true;
   const side=strokeSide(),rh=side>0?rhythm.fh:rhythm.bh;
-  const raw=swing.timing||0,timing=ori.live?clamp(raw-rh.bias,-1,1):raw;
+  const raw=swing.timing||0,timing=ori.live?clamp(raw-rh.bias,-2,2):raw;
   const fi=faceInfo(),faceRaw=fi?fi.side:0,face=ori.live?faceRaw-rh.face:faceRaw; // face angle relative to your usual
-  if(ori.live){rh.n++;const k=rh.n<4?0.35:0.15;rh.bias=clamp(rh.bias*(1-k)+raw*k,-0.6,0.6);rh.face=clamp(rh.face*(1-k)+faceRaw*k,-1,1);}
+  if(ori.live&&rh.n<5){rh.n++;const k=1/rh.n;rh.bias=clamp(rh.bias*(1-k)+raw*k,-0.35,0.35);rh.face=clamp(rh.face*(1-k)+faceRaw*k,-0.5,0.5);} // calibrate on your first 5 swings per side, then lock
   const h=apexFor(s),tz=NET+1.6+s*5.0+(Math.random()-.5)*0.4,tx=aimX(timing,side,face);
   const f=faceInfo(),closed=f&&f.loft<-0.03;
   launch(tx,tz,flightTime(ball.y,h),s<0.12||closed?null:0.1);
