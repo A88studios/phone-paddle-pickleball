@@ -175,6 +175,7 @@ const S={mode:'menu',you:0,cpu:0,server:'player',lastHitter:null,bounces:0,hits:
 const ball={x:0,y:1,z:8,vx:0,vy:0,vz:0,netHit:false,drag:0};
 const player={x:0,z:-0.4,hx:0,hz:-0.4,pred:null};
 const cpu={x:0,z:14,hx:0,hz:14,pred:null,missed:false,swing:0,walk:0};
+const rhythm={bias:0,n:0}; // your average timing, so your natural swing goes down the middle
 const swing={t:-9999,s:0,used:true};
 let lowered=0.5,lowSm=0.5,mouseYaw=0,sensorsLive=false,flash=0,mouse={y:0,v:0,vx:0,lt:0,ly:0,lx:0};
 let wake=null;
@@ -282,28 +283,29 @@ function gameOver(){
 // ---------- hitting ----------
 function swingActive(now){return !swing.used&&now-swing.t<420;} // an early swing waits briefly for the ball
 // dir = direction the paddle is moving (game frame), when known
+// early/late at this instant: + = before the ball reaches your contact point, - = after.
+// The late window is short (the ball is dropping), so lateness counts ~3x as much as earliness.
+function timingNow(){const dz=ball.z-(player.z+0.35),vz=-ball.vz,tTo=vz>0.5?dz/vz:0;
+  return tTo>=0?clamp(tTo/0.3,0,1):clamp(tTo/0.1,-1,0);}
 function triggerSwing(s,dir,vec){
   const now=performance.now();
-  if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);if(vec)swing.vec=vec;}return;}
-  swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.vec=vec||null;swing.used=false;sfx('whoosh');
-  // early/late: how long before (+) or after (-) the ball reaches your ideal contact point you swung
-  {const dz=ball.z-(player.z+0.35),vz=-ball.vz,tTo=vz>0.5?dz/vz:0;
-   // the late window is short (the ball is dropping), so lateness counts ~3x as much as earliness
-   swing.timing=tTo>=0?clamp(tTo/0.3,0,1):clamp(tTo/0.1,-1,0);}
+  if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);if(vec)swing.vec=vec;swing.timing=timingNow();}return;} // timing = fastest point of the swing
+  swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.vec=vec||null;swing.used=false;swing.peakSp=0;swing.peakDone=!ori.live;sfx('whoosh');
+  swing.timing=timingNow();
   // after a swing the view snaps back to the court and follows the ball until you return to your watching angle
   if(playing())resetView(700,'swing');
 }
 // Paddle face pointing toward the net: loft (+ = tilted back / open), side (+ = angled to the right)
 function faceInfo(){
   if(!(ori.live&&pad.G))return null;let n=pad.G.Z;if(n[2]<0)n=n.map(v=>-v);
-  return{loft:n[1],side:n[2]>0.5?clamp(n[0]/n[2],-1.2,1.2):0};
+  return{loft:n[1],side:n[2]>0.35?clamp(n[0]/n[2],-1.2,1.2):0};
 }
 // Left/right placement: timing (early = pull across), face angle, swing direction
 function aimX(timing){
   let u=0;const d=swing.dir;
-  if(d){let hx=d[0],hz=d[2];if(hz<0){hx=-hx;hz=-hz;}if(Math.hypot(hx,hz)>0.2)u=clamp(Math.atan2(hx,hz)/0.9,-1,1);}
+  if(d&&!ori.live){let hx=d[0],hz=d[2];if(hz<0){hx=-hx;hz=-hz;}if(Math.hypot(hx,hz)>0.2)u=clamp(Math.atan2(hx,hz)/0.9,-1,1);} // mouse only
   const f=faceInfo();
-  return clamp(-timing*2.8*hand()+(f?f.side*1.3:0)+u*0.7+ball.x*0.15+(Math.random()-.5)*0.3,-3.9,3.9);
+  return clamp(-timing*2.8*hand()+(f?f.side*1.3:0)+u*0.7+ball.x*0.1+(Math.random()-.5)*0.3,-3.9,3.9);
 }
 // Shot height (apex, metres): normal hold = low drive, tilted back = floater, way back = lob
 function apexFor(s){
@@ -315,8 +317,8 @@ function apexFor(s){
 }
 function flightTime(y0,h){h=Math.max(h,y0+0.15);return Math.sqrt(2*G*(h-y0))/G+Math.sqrt(2*(h-R)/G);}
 let hintT=0;
-function shotHint(h,tx){const k=h<2?'Drive':h<3.2?'Floater':'Lob',side=tx<-1.2?'left':tx>1.2?'right':'middle';
-  $('hint').textContent=k+' · '+side;clearTimeout(hintT);hintT=setTimeout(setHint,1400);}
+function shotHint(h,tx,tm){const k=h<2?'Drive':h<3.2?'Floater':'Lob',side=tx<-1.2?'left':tx>1.2?'right':'middle',when=tm>0.33?'Early':tm<-0.33?'Late':'On time';
+  $('hint').textContent=when+' · '+k+' · '+side;clearTimeout(hintT);hintT=setTimeout(setHint,1400);}
 function hitFx(){sfx('pop');flash=1;try{navigator.vibrate&&navigator.vibrate(35)}catch(e){}}
 function playerServe(){
   const s=swing.s;swing.used=true;
@@ -328,17 +330,19 @@ function playerServe(){
 }
 function tryPlayerHit(){
   if(S.lastHitter!=='cpu'||ball.z>NET)return;
+  if(!swing.peakDone&&performance.now()-swing.t<160)return; // wait for the swing to peak
   const dz=ball.z-(player.z+0.35),dx=ball.x-player.x;
-  if(dz<-0.65||dz>0.95||ball.y>2.2||Math.abs(dx)>1.6)return;
+  if(dz<-1.1||dz>0.95||ball.y>2.2||Math.abs(dx)>1.6)return;
   if(S.hits<3&&S.bounces===0){if(!S.warned){showMsg('Let it bounce first!',900);S.warned=true;}return;}
   // with motion controls the paddle itself has to be near the ball
-  if(ori.live&&Math.hypot(ball.x-pad.head[0],ball.y-pad.head[1],ball.z-pad.head[2])>0.95)return;
+  if(ori.live&&Math.hypot(ball.x-pad.head[0],ball.y-pad.head[1],ball.z-pad.head[2])>1.4)return;
   const s=swing.s;swing.used=true;
-  const timing=swing.timing||0;
+  const raw=swing.timing||0,timing=ori.live?clamp(raw-rhythm.bias,-1,1):raw;
+  if(ori.live){rhythm.n++;const k=rhythm.n<4?0.35:0.15;rhythm.bias=clamp(rhythm.bias*(1-k)+raw*k,-0.6,0.6);}
   const h=apexFor(s),tz=NET+1.6+s*5.0+(Math.random()-.5)*0.4,tx=aimX(timing);
   const f=faceInfo(),closed=f&&f.loft<-0.03;
   launch(tx,tz,flightTime(ball.y,h),s<0.12||closed?null:0.1);
-  shotHint(h,tx);
+  shotHint(h,tx,timing);
   S.lastHitter='player';S.bounces=0;S.hits++;S.isServe=false;S.lastHitT=S.t;
   cpu.pred=predict('cpu');cpu.missed=false;hitFx();
 }
@@ -451,7 +455,7 @@ function hittable(){
   if(S.mode==='serve_player')return true;
   if(S.mode!=='rally'||S.lastHitter!=='cpu'||ball.z>NET)return false;
   if(S.hits<3&&S.bounces===0)return false;
-  const dz=ball.z-(player.z+0.35);return dz>-0.65&&dz<1.1&&Math.abs(ball.x-player.x)<1.6&&ball.y<2.2;
+  const dz=ball.z-(player.z+0.35);return dz>-1.1&&dz<1.1&&Math.abs(ball.x-player.x)<1.6&&ball.y<2.2;
 }
 // Paddle head outline in phone coordinates (metres): x across, y along the phone, face in the x–y plane
 const OUT=(()=>{const pts=[],cy=0.235,hw=0.095,hh=0.125,r=0.055;
@@ -513,7 +517,9 @@ addEventListener('deviceorientation',e=>{
       const w=[(R(2,1)-R(1,2))/2/dt,(R(0,2)-R(2,0))/2/dt,(R(1,0)-R(0,1))/2/dt];
       ori.turn=len(w);const v=cross(w,G.Y.map(x=>x*0.55)),sp=len(v),th=SENS[set.sens].v; // forearm + paddle ≈ 55 cm lever
       if(sp>th&&v[1]>-0.5*sp&&playing())triggerSwing(clamp(0.15+(sp-th)/12,0,1),v,v);
-      else if(performance.now()-swing.t<230&&!swing.used&&sp>len(swing.vec||[0,0,0]))swing.vec=v;}}
+      else if(performance.now()-swing.t<230&&!swing.used&&sp>len(swing.vec||[0,0,0]))swing.vec=v;
+      // contact happens at the fastest point of the swing, like a real paddle
+      if(!swing.used&&!swing.peakDone&&performance.now()-swing.t<230){if(sp>swing.peakSp){swing.peakSp=sp;swing.timing=timingNow();}else if(sp<swing.peakSp*0.85)swing.peakDone=true;}}}
   // look where the back of the phone points, only while it's held up and fairly still
   if(view.needRecenter&&now>view.resetUntil&&(ori.turn||0)<2.5){
     const tilt=Math.acos(clamp(m.Y[2],-1,1))*180/Math.PI; // degrees back from upright
