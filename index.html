@@ -130,7 +130,8 @@ addEventListener('resize',resize);resize();
 const cam={x:0,y:2.1,z:-1.8,p:0.22,yaw:0};let cp=Math.cos(cam.p),sp=Math.sin(cam.p),cyw=1,syw=0;
 // where you're looking: follows the phone while you hold it up; holds still while you swing
 const view={tYaw:0,tPitch:0.22,manual:false,needRecenter:false,resetUntil:0};
-function resetView(ms){if(ori.live){view.needRecenter=true;view.resetUntil=performance.now()+ms;}}
+// kind 'point': take your current facing AND holding angle as straight ahead; kind 'swing': facing only, once you're back at your watching angle
+function resetView(ms,kind){if(ori.live){view.needRecenter=true;view.resetUntil=performance.now()+ms;if(kind==='point'||view.kind!=='point')view.kind=kind;}}
 function setCamAngles(){cp=Math.cos(cam.p);sp=Math.sin(cam.p);cyw=Math.cos(cam.yaw);syw=Math.sin(cam.yaw);}
 function toCamDir(v){const x1=v[0]*cyw-v[2]*syw,z1=v[0]*syw+v[2]*cyw;return[x1,v[1]*cp+z1*sp,z1*cp-v[1]*sp];}
 function toCam(x,y,z){const dx=x-cam.x,dy=y-cam.y,dz0=z-cam.z,x1=dx*cyw-dz0*syw,dz=dx*syw+dz0*cyw;return[x1,dy*cp+dz*sp,dz*cp-dy*sp];}
@@ -180,7 +181,7 @@ function devMatrix(a,b,g){const d=Math.PI/180;a*=d;b*=d;g*=d;
 // earth -> game (x right, y up, z toward the net), using the heading you faced when centred
 function e2g(v,H){const c=Math.cos(H),s=Math.sin(H);return[v[0]*c-v[1]*s,v[2],v[0]*s+v[1]*c];}
 function headingOf(m){let f=[-m.Z[0],-m.Z[1]];if(Math.hypot(f[0],f[1])<0.5)f=[m.Y[0],m.Y[1]];return Math.atan2(f[0],f[1]);}
-const ori={raw:null,H:null,G:null,t:0,live:false,motion:false};
+const ori={raw:null,H:null,G:null,t:0,live:false,motion:false,tilt:null};
 function recenter(){if(ori.raw){ori.H=headingOf(ori.raw);ori.G=null;}}
 // Paddle pose used when there are no sensors (computer / tap mode)
 function synthG(t,yaw,sw){
@@ -251,13 +252,13 @@ function onBounce(iv){
 }
 function endPoint(winner,reason){
   if(S.mode!=='rally')return;
-  S.mode='point';S.t=0;if(winner==='player')S.you++;else S.cpu++;S.server=winner;resetView(900);
+  S.mode='point';S.t=0;if(winner==='player')S.you++;else S.cpu++;S.server=winner;resetView(900,'point');
   showMsg((winner==='player'?'Point! ':'CPU point. ')+reason,1700);sfx(winner==='player'?'win':'lose');hud();
 }
 function nextPoint(){
   if((S.you>=11||S.cpu>=11)&&Math.abs(S.you-S.cpu)>=2)return gameOver();
   S.hits=0;S.bounces=0;S.lastHitter=null;S.isServe=false;S.t=0;S.warned=false;ball.netHit=false;
-  player.pred=cpu.pred=null;cpu.missed=false;resetView(600);
+  player.pred=cpu.pred=null;cpu.missed=false;resetView(600,'point');
   if(S.server==='player'){const sx=S.you%2===0?1.5:-1.5;player.hx=sx;player.hz=-0.4;cpu.hx=-sx;cpu.hz=14;S.mode='serve_player';showMsg('Your serve. Swing!',1400);}
   else{const cx=S.cpu%2===0?-1.5:1.5;cpu.hx=cx;cpu.hz=14;player.hx=-cx;player.hz=-0.4;S.mode='serve_cpu';S.serveAt=1.7;showMsg('CPU serving…',1100);}
   hud();
@@ -275,7 +276,7 @@ function triggerSwing(s,dir){
   if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);}return;}
   swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.used=false;sfx('whoosh');
   // after a swing the view snaps back to the court and follows the ball until you return to your watching angle
-  if(playing())resetView(700);
+  if(playing())resetView(700,'swing');
 }
 // Where the shot goes left/right: the way your hand moved (edge-on hits are fine), plus timing
 function aimX(timing){
@@ -467,7 +468,7 @@ addEventListener('deviceorientation',e=>{
   if(e.beta==null)return;
   const now=performance.now(),m=devMatrix(e.alpha||0,e.beta,e.gamma||0);ori.raw=m;
   if(ori.H==null)ori.H=headingOf(m);
-  const H=ori.H,X0=e2g(m.X,H),off=-(HOLD[set.hold]||0)*Math.PI/180;
+  const H=ori.H,X0=e2g(m.X,H),off=-(ori.tilt!=null?ori.tilt:(HOLD[set.hold]||0))*Math.PI/180;
   // treat your normal holding angle as "straight ahead" so you don't have to lift the phone upright
   const G={X:X0,Y:rot(e2g(m.Y,H),X0,off),Z:rot(e2g(m.Z,H),X0,off)};
   if(ori.G){const dt=(now-ori.t)/1000;
@@ -476,7 +477,11 @@ addEventListener('deviceorientation',e=>{
       ori.turn=len(w);const v=cross(w,G.Y.map(x=>x*0.55)),sp=len(v),th=SENS[set.sens].v; // forearm + paddle ≈ 55 cm lever
       if(sp>th&&v[1]>-0.5*sp&&playing())triggerSwing(clamp(0.15+(sp-th)/12,0,1),v);}}
   // look where the back of the phone points, only while it's held up and fairly still
-  if(view.needRecenter&&now>view.resetUntil&&G.Y[1]>0.8&&(ori.turn||0)<2){ori.H=headingOf(m);view.needRecenter=false;ori.G=null;ori.t=now;return;}
+  if(view.needRecenter&&now>view.resetUntil&&(ori.turn||0)<2.5){
+    const tilt=Math.acos(clamp(m.Y[2],-1,1))*180/Math.PI; // degrees back from upright
+    if(view.kind==='point'?tilt<=75:G.Y[1]>0.8){
+      ori.H=headingOf(m);if(view.kind==='point')ori.tilt=tilt;
+      view.needRecenter=false;view.kind=null;ori.G=null;ori.t=now;return;}}
   {const lk=[-G.Z[0],-G.Z[1],-G.Z[2]],upw=G.Y[1],turn=ori.G?ori.turn||0:0,hz=Math.hypot(lk[0],lk[2]);
    if(!view.needRecenter&&upw>0.6&&turn<4&&hz>0.3){view.tYaw=clamp(Math.atan2(lk[0],lk[2]),-1.3,1.3);view.tPitch=clamp(0.22+Math.asin(clamp(-lk[1],-1,1))*0.75,-0.1,0.8);view.manual=true;}}
   ori.G=G;ori.t=now;
@@ -529,7 +534,7 @@ $('pMotion').addEventListener('click',()=>{initAudio();askMotion().then(r=>{setT
 $('pauseBtn').addEventListener('click',togglePause);
 $('pMain').addEventListener('click',()=>{if(S.mode==='paused')togglePause();else{$('panel').classList.add('hide');newGame();}});
 $('pQuit').addEventListener('click',()=>{$('panel').classList.add('hide');S.mode='menu';$('menu').classList.remove('hide');$('hud').classList.remove('on');$('hint').textContent='';});
-function newGame(){S.you=0;S.cpu=0;S.server='player';player.x=1.5;player.z=-0.4;cpu.x=-1.5;cpu.z=14;cam.x=1.6;cam.z=-1.8;recenter();
+function newGame(){S.you=0;S.cpu=0;S.server='player';player.x=1.5;player.z=-0.4;cpu.x=-1.5;cpu.z=14;cam.x=1.6;cam.z=-1.8;ori.tilt=null;recenter();
   $('menu').classList.add('hide');$('hud').classList.add('on');nextPoint();setHint();setTimeout(setHint,1500);}
 $('startBtn').addEventListener('click',()=>{
   initAudio();try{AC&&AC.resume()}catch(e){}
