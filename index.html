@@ -230,8 +230,10 @@ function moveInput(){
   if(keyMove)return keyMove;
   if(!(ori.live&&ori.G))return 0;
   const deg=Math.asin(clamp(ori.G.Y[0],-1,1))*180/Math.PI,a=Math.abs(deg);
-  return a<8?0:Math.sign(deg)*clamp((a-8)/22,0,1);
+  return a<6?0:Math.sign(deg)*clamp((a-6)/14,0,1); // full speed from about 20°
 }
+const REACH=0.75; // metres sideways from the paddle head
+const reachX=()=>ori.live?Math.abs(ball.x-pad.head[0]):Math.abs(ball.x-player.x)-0.25;
 const sideOf=z=>z<NET?'player':'cpu';
 const other=s=>s==='player'?'cpu':'player';
 
@@ -353,7 +355,7 @@ function tryPlayerHit(){
   if(S.lastHitter!=='cpu'||ball.z>NET)return;
   if(!swing.peakDone&&performance.now()-swing.t<160)return; // wait for the swing to peak
   const dz=ball.z-(player.z+0.35),dx=ball.x-player.x;
-  if(dz<-1.1||dz>0.95||ball.y>2.2||Math.abs(dx)>1.6)return;
+  if(dz<-1.1||dz>0.95||ball.y>2.2||reachX()>REACH)return;
   if(S.hits<3&&S.bounces===0){if(!S.warned){showMsg('Let it bounce first!',900);S.warned=true;}return;}
   // with motion controls the paddle itself has to be near the ball
   if(ori.live&&Math.hypot(ball.x-pad.head[0],ball.y-pad.head[1],ball.z-pad.head[2])>1.4)return;
@@ -485,7 +487,7 @@ function hittable(){
   if(S.mode==='serve_player')return true;
   if(S.mode!=='rally'||S.lastHitter!=='cpu'||ball.z>NET)return false;
   if(S.hits<3&&S.bounces===0)return false;
-  const dz=ball.z-(player.z+0.35);return dz>-1.1&&dz<1.1&&Math.abs(ball.x-player.x)<1.6&&ball.y<2.2;
+  const dz=ball.z-(player.z+0.35);return dz>-1.1&&dz<1.1&&reachX()<=REACH&&ball.y<2.2;
 }
 // Paddle head outline in phone coordinates (metres): x across, y along the phone, face in the x–y plane
 const OUT=(()=>{const pts=[],cy=0.235,hw=0.095,hh=0.125,r=0.055;
