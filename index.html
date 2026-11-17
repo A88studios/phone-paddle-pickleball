@@ -81,13 +81,14 @@ button:focus-visible{outline:3px solid #e6ff3a;outline-offset:2px}
     <ol>
       <li>Your phone is the paddle. Hold it at a comfortable angle, like reading a text, and you see straight down the court through a see-through paddle face. Turn or tilt the phone to look around and follow the ball.</li>
       <li>Drop it down and turn it to your side like a real paddle and you see its edge. Swing your hand through the ball when it glows yellow.</li>
-      <li>Placement: point the paddle face where you want the ball to go. Timing adds a little: early pulls across your body, late pushes the other way. Overdo it and it goes out. Swing harder to hit deeper.</li>
+      <li>Placement: point the paddle face where you want the ball to go. A swing or a short punch both work. With Face + timing, early also pulls across your body and late pushes the other way. Swing harder to hit deeper.</li>
       <li>Height: your normal angle hits a low drive. Tilt the face back for a floater, way back to pop up a lob.</li>
       <li>Rally scoring to 11, win by 2. The serve and the return must bounce before they're hit.</li>
     </ol>
     <div class="opt"><span>Dominant hand</span><div class="seg" data-k="hand"><button data-v="left">Left</button><button data-v="right">Right</button></div></div>
     <div class="opt"><span>Opponent</span><div class="seg" data-k="diff"><button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
     <div class="opt"><span>How you hold the phone to watch</span><div class="seg" data-k="hold"><button data-v="upright">Upright</button><button data-v="angled">Angled</button><button data-v="low">Low</button></div></div>
+    <div class="opt"><span>Aim with</span><div class="seg" data-k="aimby"><button data-v="face">Face only</button><button data-v="both">Face + timing</button></div></div>
     <div class="opt"><span>Face aim</span><div class="seg" data-k="aim"><button data-v="std">Standard</button><button data-v="strong">Strong</button></div></div>
     <div class="opt"><span>Swing sensitivity</span><div class="seg" data-k="sens"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
     <button id="startBtn" class="primary">Start game</button>
@@ -118,8 +119,8 @@ const DIFF={
   hard:{speed:3.0,react:0.32,err:0.05,T:[0.85,1.25],reach:1.05,fault:0.03}
 };
 // v = paddle-head speed (m/s) estimated from phone rotation; acc = linear acceleration (m/s²); rot = deg/s fallback
-const SENS={low:{v:3.2,acc:18,rot:380},med:{v:2.2,acc:13,rot:260},high:{v:1.4,acc:9,rot:170}};
-const set={hand:'right',diff:'normal',sens:'med',hold:'angled',aim:'std'};
+const SENS={low:{v:3.2,acc:14,rot:380},med:{v:2.2,acc:9,rot:260},high:{v:1.4,acc:6,rot:170}}; // acc: a firm punch registers
+const set={hand:'right',diff:'normal',sens:'med',hold:'angled',aim:'std',aimby:'face'};
 const AIM={std:3.2,strong:4.1}; // metres of sideways travel per unit of face angle (tan): std ~1.2 m per 20°, strong ~1.5 m
 // how far from upright you hold the phone when you're just watching (degrees back from vertical)
 const HOLD={upright:0,angled:45,low:65};
@@ -198,6 +199,8 @@ function devMatrix(a,b,g){const d=Math.PI/180;a*=d;b*=d;g*=d;
 function e2g(v,H){const c=Math.cos(H),s=Math.sin(H);return[v[0]*c-v[1]*s,v[2],v[0]*s+v[1]*c];}
 function headingOf(m){let f=[-m.Z[0],-m.Z[1]];if(Math.hypot(f[0],f[1])<0.5)f=[m.Y[0],m.Y[1]];return Math.atan2(f[0],f[1]);}
 const ori={raw:null,H:null,G:null,t:0,live:false,motion:false,tilt:null};
+// re-capture forward without ever flipping it around (the phone may be facing either way)
+function safeHeading(m){let h=headingOf(m);if(ori.H!=null){let d=Math.atan2(Math.sin(h-ori.H),Math.cos(h-ori.H));if(Math.abs(d)>Math.PI/2)h+=Math.PI;}return h;}
 function recenter(){if(ori.raw){ori.H=headingOf(ori.raw);ori.G=null;}}
 // Paddle pose used when there are no sensors (computer / tap mode)
 function synthG(t,yaw,sw){
@@ -295,7 +298,7 @@ function timingNow(){const dz=ball.z-(player.z+0.35),vz=-ball.vz,tTo=vz>0.5?dz/v
 function triggerSwing(s,dir,vec){
   const now=performance.now();
   if(now-swing.t<230){if(!swing.used&&s>swing.s){swing.s=s;if(dir)swing.dir=nrm(dir);if(vec)swing.vec=vec;swing.timing=timingNow();}return;} // timing = fastest point of the swing
-  swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.vec=vec||null;swing.used=false;swing.peakSp=0;swing.peakDone=!ori.live;sfx('whoosh');
+  swing.t=now;swing.s=s;swing.dir=dir?nrm(dir):null;swing.vec=vec||null;swing.used=false;swing.peakSp=0;swing.peakAcc=0;swing.peakDone=!ori.live;sfx('whoosh');
   swing.timing=timingNow();
   // after a swing the view snaps back to the court and follows the ball until you return to your watching angle
   if(playing())resetView(700,'swing');
@@ -311,7 +314,8 @@ function aimX(timing,side,face){side=side||1;
   if(d&&!ori.live){let hx=d[0],hz=d[2];if(hz<0){hx=-hx;hz=-hz;}if(Math.hypot(hx,hz)>0.2)u=clamp(Math.atan2(hx,hz)/0.9,-1,1);} // mouse only
   if(face==null){const f=faceInfo();face=f?f.side:0;}
   // face direction is the main aim (~1.2 m per 20 degrees); timing adds a smaller push. No cap: overdo either and it goes out.
-  return face*(AIM[set.aim]||3.2)-timing*1.2*hand()*side+u*0.7+ball.x*0.1+(Math.random()-.5)*0.7;
+  const tw=ori.live&&set.aimby==='face'?0:1.2; // Face only: timing doesn't steer the ball
+  return face*(AIM[set.aim]||3.2)-timing*tw*hand()*side+u*0.7+ball.x*0.1+(Math.random()-.5)*0.7;
 }
 // Shot height (apex, metres): normal hold = low drive, tilted back = floater, way back = lob
 function apexFor(s){
@@ -324,7 +328,7 @@ function apexFor(s){
 function flightTime(y0,h){h=Math.max(h,y0+0.15);return Math.sqrt(2*G*(h-y0))/G+Math.sqrt(2*(h-R)/G);}
 let hintT=0;
 function shotHint(h,tx,tm,side){const k=h<2?'Drive':h<3.2?'Floater':'Lob',when=tm>0.33?'Early':tm<-0.33?'Late':'On time';
-  $('hint').textContent=(side<0?'Backhand':'Forehand')+' · '+when+' · '+k+' · '+(tx<-1.2?'left':tx>1.2?'right':'middle');clearTimeout(hintT);hintT=setTimeout(setHint,1400);}
+  $('hint').textContent=(side<0?'Backhand':'Forehand')+' · '+(ori.live&&set.aimby==='face'?'':when+' · ')+k+' · '+(tx<-1.2?'left':tx>1.2?'right':'middle');clearTimeout(hintT);hintT=setTimeout(setHint,1400);}
 function hitFx(){sfx('pop');flash=1;try{navigator.vibrate&&navigator.vibrate(35)}catch(e){}}
 function playerServe(){
   const s=swing.s;swing.used=true;
@@ -533,7 +537,7 @@ addEventListener('deviceorientation',e=>{
   if(view.needRecenter&&now>view.resetUntil&&(ori.turn||0)<2.5){
     const tilt=Math.acos(clamp(m.Y[2],-1,1))*180/Math.PI; // degrees back from upright
     if(view.kind==='point'?tilt<=75:G.Y[1]>0.8){
-      ori.H=headingOf(m);
+      ori.H=safeHeading(m);
       view.needRecenter=false;view.kind=null;ori.G=null;ori.t=now;return;}}
   {const lk=[-G.Z[0],-G.Z[1],-G.Z[2]],upw=G.Y[1],turn=ori.G?ori.turn||0:0,hz=Math.hypot(lk[0],lk[2]);
    if(!view.needRecenter&&upw>0.6&&turn<4&&hz>0.3){view.tYaw=clamp(Math.atan2(lk[0],lk[2]),-1.3,1.3);view.tPitch=clamp(0.22+Math.asin(clamp(-lk[1],-1,1))*0.75,-0.1,0.8);view.manual=true;}}
@@ -546,6 +550,8 @@ addEventListener('devicemotion',e=>{
     const ea=[m.X[0]*a.x+m.Y[0]*a.y+m.Z[0]*a.z,m.X[1]*a.x+m.Y[1]*a.y+m.Z[1]*a.z,m.X[2]*a.x+m.Y[2]*a.y+m.Z[2]*a.z];
     const ga=e2g(ea,ori.H),mag=len(ga);
     if(mag>th.acc&&ga[1]>-0.5*mag&&playing())triggerSwing(clamp(0.2+(mag-th.acc)/30,0,1),ga);
+    // a straight punch barely rotates the phone: track its peak from acceleration so contact lands at full punch
+    if(!swing.used&&!swing.peakDone&&performance.now()-swing.t<230){if(mag>(swing.peakAcc||0)){swing.peakAcc=mag;swing.timing=timingNow();}else if(mag<swing.peakAcc*0.85&&mag<(swing.peakAcc||0)-2)swing.peakDone=true;}
   }else if(!ori.live){const r=e.rotationRate;if(!r||r.alpha==null)return; // no orientation: plain spin speed
     if(!sensorsLive){sensorsLive=true;setHint();}
     const rs=Math.hypot(r.alpha||0,r.beta||0,r.gamma||0);if(rs>th.rot&&playing())triggerSwing(clamp(0.2+(rs-th.rot)/1400,0,1),null);}
